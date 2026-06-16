@@ -31,135 +31,164 @@ async function loginAndExtractGemini({ phone, otp, sessionId, onLog }) {
       timeout: 30000
     });
 
-    // Random human-like delay
-    await randomDelay(1000, 2500);
-
-    // Enter phone number
-    log(`Entering phone number: ${phone}`);
-    const phoneInput = await page.waitForSelector(
-      'input[type="tel"], input[placeholder*="number"], input[placeholder*="mobile"], input[name*="mobile"], input[name*="phone"]',
-      { timeout: 15000 }
-    );
-    await phoneInput.click();
-    await randomDelay(300, 700);
-    await phoneInput.fill(phone.replace(/^91/, '')); // Remove 91 country code if present
-
-    await randomDelay(500, 1000);
-
-    // Click Generate OTP button
-    log('Clicking Generate OTP...');
-    const otpBtn = await page.waitForSelector(
-      'button:has-text("Generate OTP"), button:has-text("Get OTP"), button:has-text("Send OTP")',
-      { timeout: 10000 }
-    );
-    await otpBtn.click();
-
     await randomDelay(1000, 2000);
 
-    // Enter OTP
-    log(`Entering OTP: ${otp}`);
-    const otpInput = await page.waitForSelector(
-      'input[type="tel"][maxlength], input[placeholder*="OTP"], input[placeholder*="otp"], input[name*="otp"]',
-      { timeout: 15000 }
-    );
+    // Enter phone number (strip 91 country code if present)
+    log(`Entering phone number: ${phone}`);
+    const phoneInput = await page.waitForSelector('input[type="tel"]', { timeout: 15000 });
+    await phoneInput.click();
+    await randomDelay(300, 600);
+    await phoneInput.fill(phone.replace(/^91/, ''));
 
-    // Some Jio pages have separate digit boxes
-    const otpBoxes = await page.$$('input[maxlength="1"]');
-    if (otpBoxes.length >= 4) {
-      log('Detected digit-by-digit OTP input');
-      const digits = otp.split('');
-      for (let i = 0; i < otpBoxes.length && i < digits.length; i++) {
-        await otpBoxes[i].click();
-        await randomDelay(100, 300);
-        await otpBoxes[i].fill(digits[i]);
-      }
-    } else {
-      await otpInput.click();
-      await randomDelay(300, 600);
-      await otpInput.fill(otp);
+    await randomDelay(800, 1200);
+
+    // Click Generate OTP
+    log('Clicking Generate OTP...');
+    const otpBtn = await page.waitForSelector('button:has-text("Generate OTP")', { timeout: 10000 });
+    await otpBtn.click();
+
+    await randomDelay(1500, 2500);
+
+    // Check for non-Jio error message
+    const bodyText = await page.textContent('body');
+    if (bodyText.includes('non-Jio number')) {
+      log('Non-Jio number detected');
+      await browser.close();
+      return { success: false, error: 'Non-Jio number', notJio: true };
     }
 
-    await randomDelay(500, 1000);
+    // Wait for 6-digit OTP input boxes
+    log('Waiting for OTP input boxes...');
+    await page.waitForSelector('input[maxlength="1"]', { timeout: 15000 });
+    const otpBoxes = await page.$$('input[maxlength="1"]');
 
-    // Submit / Verify
-    log('Submitting OTP...');
-    const submitBtn = await page.waitForSelector(
-      'button:has-text("Verify"), button:has-text("Login"), button:has-text("Submit"), button:has-text("Confirm")',
-      { timeout: 10000 }
-    );
+    if (otpBoxes.length < 6) {
+      log(`Expected 6 OTP boxes but found ${otpBoxes.length}`);
+      await browser.close();
+      return { success: false, error: 'OTP input not found', notJio: false };
+    }
+
+    // Enter OTP digit by digit
+    log(`Entering OTP: ${otp}`);
+    const digits = otp.split('');
+    for (let i = 0; i < 6; i++) {
+      await otpBoxes[i].click();
+      await randomDelay(80, 180);
+      await otpBoxes[i].fill(digits[i]);
+    }
+
+    await randomDelay(500, 800);
+
+    // FIX: Jio does NOT auto-submit — must click Submit button
+    log('Clicking Submit...');
+    const submitBtn = await page.waitForSelector('button:has-text("Submit")', { timeout: 8000 });
     await submitBtn.click();
 
-    // Wait for dashboard to load
+    // Wait for navigation to dashboard
     log('Waiting for dashboard...');
     await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 });
-    await randomDelay(2000, 4000);
+    await randomDelay(2000, 3000);
 
-    // Check if login was successful (not still on login page)
+    // Verify login succeeded
     const currentUrl = page.url();
-    if (currentUrl.includes('/login') || currentUrl.includes('/selfcare/login')) {
-      log('Login failed or stuck on login page');
+    if (currentUrl.includes('/login')) {
+      log('Still on login page — OTP rejected or expired');
       await browser.close();
-      return { success: false, error: 'Login failed', notJio: false };
+      return { success: false, error: 'OTP rejected or expired', notJio: false };
     }
 
-    // Look for Gemini banner/link
-    log('Searching for Gemini link...');
-    const geminiUrl = await findGeminiUrl(page, log);
+    log('Logged in successfully, looking for Gemini banner...');
+
+    // FIX: Click "Claim now" banner and capture the final redirected URL
+    const claimUrl = await clickClaimAndGetUrl(page, context, log);
 
     await browser.close();
 
-    if (geminiUrl) {
-      log(`Gemini URL found: ${geminiUrl}`);
-      return { success: true, geminiUrl };
+    if (claimUrl) {
+      log(`Claim URL captured: ${claimUrl}`);
+      return { success: true, geminiUrl: claimUrl };
     } else {
-      log('No Gemini URL found on dashboard');
-      return { success: false, error: 'No Gemini URL found' };
+      log('No Gemini banner found on dashboard');
+      return { success: false, error: 'No Gemini banner found', notJio: false };
     }
 
   } catch (err) {
     log(`Error: ${err.message}`);
     if (browser) await browser.close();
-
-    // Check if it's a non-Jio number error
-    const notJio = err.message.includes('not a Jio') ||
-                   err.message.includes('invalid') ||
-                   err.message.includes('not registered');
-
-    return { success: false, error: err.message, notJio };
+    return { success: false, error: err.message, notJio: false };
   }
 }
 
-async function findGeminiUrl(page, log) {
-  // Try multiple strategies to find Gemini URL
+async function clickClaimAndGetUrl(page, context, log) {
+  try {
+    // Wait a moment for banner to render
+    await randomDelay(1500, 2500);
 
-  // Strategy 1: Find direct link to gemini.google.com
-  const links = await page.$$eval('a', anchors =>
-    anchors.map(a => a.href).filter(href =>
-      href.includes('gemini.google.com') ||
-      href.includes('gemini') ||
-      href.toLowerCase().includes('gemini')
-    )
-  );
-  if (links.length > 0) return links[0];
+    // Strategy 1: Find and click "Claim now" button on dashboard
+    const claimBtn = await page.$('button:has-text("Claim now"), a:has-text("Claim now"), [class*="claim"]');
+    if (claimBtn) {
+      log('Found Claim now button, clicking...');
 
-  // Strategy 2: Find buttons/banners with Gemini text and extract href
-  const geminiElements = await page.$$('[href*="gemini"], [data-url*="gemini"]');
-  if (geminiElements.length > 0) {
-    const href = await geminiElements[0].getAttribute('href') ||
-                 await geminiElements[0].getAttribute('data-url');
-    if (href) return href;
+      // Listen for new page/tab that opens after click
+      const [newPage] = await Promise.all([
+        context.waitForEvent('page', { timeout: 10000 }).catch(() => null),
+        claimBtn.click()
+      ]);
+
+      if (newPage) {
+        // Opened in new tab
+        await newPage.waitForLoadState('domcontentloaded');
+        await randomDelay(2000, 3000);
+        const finalUrl = newPage.url();
+        log(`New tab URL: ${finalUrl}`);
+        await newPage.close();
+        return finalUrl;
+      }
+
+      // Opened in same tab
+      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
+      await randomDelay(1500, 2500);
+
+      // May redirect multiple times — wait for final URL
+      await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+      const finalUrl = page.url();
+      log(`Final URL after claim: ${finalUrl}`);
+
+      if (finalUrl.includes('google.com') || finalUrl.includes('gemini') || finalUrl.includes('one.google')) {
+        return finalUrl;
+      }
+    }
+
+    // Strategy 2: Look for the Gemini banner link directly
+    const geminiLink = await page.$('a[href*="google.com"], a[href*="gemini"], a[href*="one.google"]');
+    if (geminiLink) {
+      const href = await geminiLink.getAttribute('href');
+      log(`Found direct Gemini link: ${href}`);
+      return href;
+    }
+
+    // Strategy 3: Scan page source for Google One / Gemini claim URLs
+    const content = await page.content();
+    const patterns = [
+      /https?:\/\/one\.google\.com\/[^\s"'<>]*/gi,
+      /https?:\/\/[^\s"'<>]*gemini[^\s"'<>]*/gi,
+      /https?:\/\/jio\.com\/selfcare\/goog[^\s"'<>]*/gi
+    ];
+
+    for (const pattern of patterns) {
+      const match = content.match(pattern);
+      if (match && match.length > 0) {
+        log(`Found URL via page scan: ${match[0]}`);
+        return match[0];
+      }
+    }
+
+    return null;
+
+  } catch (err) {
+    log(`clickClaimAndGetUrl error: ${err.message}`);
+    return null;
   }
-
-  // Strategy 3: Look for redeem/claim links near Gemini text
-  const pageText = await page.content();
-  if (pageText.toLowerCase().includes('gemini')) {
-    log('Gemini text found on page, searching deeper...');
-    // Extract URLs from page source that include gemini
-    const urlMatch = pageText.match(/https?:\/\/[^\s"'<>]*gemini[^\s"'<>]*/gi);
-    if (urlMatch && urlMatch.length > 0) return urlMatch[0];
-  }
-
-  return null;
 }
 
 async function randomDelay(min, max) {
@@ -168,4 +197,3 @@ async function randomDelay(min, max) {
 }
 
 module.exports = { loginAndExtractGemini };
-
