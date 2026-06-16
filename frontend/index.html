@@ -1,1 +1,992 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>OTP Automation Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<style>
+  :root {
+    --beige: #F5F0E8;
+    --cream: #FFFDF7;
+    --brown: #6B4C3B;
+    --brown-dark: #3D2B1F;
+    --brown-light: #9B7A6B;
+    --grey: #8A8A8A;
+    --grey-light: #E8E4DE;
+    --grey-dark: #4A4A4A;
+    --green: #2D6A4F;
+    --red: #C0392B;
+    --orange: #D4812A;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--beige);
+    color: var(--brown-dark);
+    min-height: 100vh;
+  }
+
+  /* NAV */
+  .navbar {
+    background: var(--brown-dark);
+    color: var(--cream);
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+  .navbar h1 { font-size: 1.2rem; font-weight: 700; letter-spacing: 0.5px; }
+  .navbar span { font-size: 0.8rem; color: var(--brown-light); }
+  .balance-badge {
+    background: var(--brown);
+    color: var(--cream);
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  /* TABS */
+  .tabs {
+    display: flex;
+    background: var(--cream);
+    border-bottom: 2px solid var(--grey-light);
+    overflow-x: auto;
+    position: sticky;
+    top: 56px;
+    z-index: 90;
+  }
+  .tab {
+    padding: 12px 20px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--grey);
+    border-bottom: 3px solid transparent;
+    white-space: nowrap;
+    transition: all 0.2s;
+  }
+  .tab.active {
+    color: var(--brown);
+    border-bottom-color: var(--brown);
+    background: var(--beige);
+  }
+  .tab:hover { color: var(--brown); }
+
+  /* PAGES */
+  .page { display: none; padding: 20px; max-width: 900px; margin: 0 auto; }
+  .page.active { display: block; }
+
+  /* CARDS */
+  .card {
+    background: var(--cream);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+    border: 1px solid var(--grey-light);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  }
+  .card h3 {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--brown-dark);
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--grey-light);
+  }
+
+  /* FORM ELEMENTS */
+  .form-group { margin-bottom: 14px; }
+  label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--grey-dark);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  input[type="text"], input[type="password"], input[type="number"], select {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1.5px solid var(--grey-light);
+    border-radius: 8px;
+    background: var(--beige);
+    color: var(--brown-dark);
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  input:focus, select:focus { border-color: var(--brown); }
+
+  /* BUTTONS */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-primary { background: var(--brown); color: var(--cream); }
+  .btn-primary:hover { background: var(--brown-dark); }
+  .btn-danger { background: var(--red); color: white; }
+  .btn-danger:hover { background: #a93226; }
+  .btn-success { background: var(--green); color: white; }
+  .btn-success:hover { background: #245a42; }
+  .btn-ghost {
+    background: transparent;
+    border: 1.5px solid var(--grey-light);
+    color: var(--grey-dark);
+  }
+  .btn-ghost:hover { border-color: var(--brown); color: var(--brown); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* STATUS BADGE */
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .badge-success { background: #d4edda; color: #155724; }
+  .badge-warning { background: #fff3cd; color: #856404; }
+  .badge-error { background: #f8d7da; color: #721c24; }
+  .badge-info { background: #d1ecf1; color: #0c5460; }
+  .badge-grey { background: var(--grey-light); color: var(--grey-dark); }
+
+  /* SEARCH BAR */
+  .search-wrap { position: relative; margin-bottom: 12px; }
+  .search-wrap input { padding-left: 36px; }
+  .search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--grey);
+    font-size: 0.9rem;
+  }
+
+  /* SERVICE LIST */
+  .service-list {
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid var(--grey-light);
+    border-radius: 8px;
+    background: var(--beige);
+  }
+  .service-item {
+    padding: 12px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--grey-light);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background 0.15s;
+  }
+  .service-item:hover { background: var(--grey-light); }
+  .service-item.selected { background: #e8ddd6; border-left: 3px solid var(--brown); }
+  .service-item:last-child { border-bottom: none; }
+  .service-name { font-size: 0.88rem; font-weight: 600; }
+  .service-meta { font-size: 0.75rem; color: var(--grey); }
+  .service-price {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--brown);
+    white-space: nowrap;
+    margin-left: 10px;
+  }
+
+  /* MANUAL NUMBER CARDS */
+  .numbers-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 12px;
+    margin-top: 14px;
+  }
+  .number-card {
+    background: var(--beige);
+    border: 1px solid var(--grey-light);
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .number-card .num { font-size: 1rem; font-weight: 700; letter-spacing: 1px; margin-bottom: 8px; }
+  .number-card .timer { font-size: 0.8rem; color: var(--orange); font-weight: 600; }
+  .number-card .sms { font-size: 0.8rem; color: var(--grey); margin-top: 6px; word-break: break-all; }
+  .number-card .actions { display: flex; gap: 6px; margin-top: 10px; }
+  .number-card .actions .btn { padding: 6px 12px; font-size: 0.78rem; }
+
+  /* SESSION BOARD */
+  .session-board {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 10px;
+    margin-top: 14px;
+  }
+  .session-card {
+    background: var(--beige);
+    border: 1.5px solid var(--grey-light);
+    border-radius: 10px;
+    padding: 14px;
+    text-align: center;
+    transition: border-color 0.3s;
+  }
+  .session-card.running { border-color: var(--green); }
+  .session-card.stopped { border-color: var(--grey); }
+  .session-card.error { border-color: var(--red); }
+  .session-num { font-size: 0.75rem; font-weight: 700; color: var(--grey); text-transform: uppercase; }
+  .session-phone { font-size: 0.85rem; font-weight: 700; margin: 6px 0 4px; }
+  .session-step { font-size: 0.75rem; color: var(--grey-dark); line-height: 1.4; }
+
+  /* LIVE LOG */
+  .log-box {
+    background: var(--brown-dark);
+    color: #b8e0b8;
+    border-radius: 8px;
+    padding: 14px;
+    height: 200px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 0.78rem;
+    line-height: 1.6;
+    margin-top: 14px;
+  }
+  .log-entry { margin-bottom: 2px; }
+  .log-entry .log-time { color: #8a8a8a; margin-right: 6px; }
+  .log-entry .log-sid { color: #ffd700; margin-right: 6px; }
+
+  /* RESULTS TABLE */
+  .results-table-wrap { overflow-x: auto; margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  thead th {
+    background: var(--brown-dark);
+    color: var(--cream);
+    padding: 10px 12px;
+    text-align: left;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  tbody tr { border-bottom: 1px solid var(--grey-light); }
+  tbody tr:hover { background: var(--grey-light); }
+  tbody td { padding: 9px 12px; }
+  .url-cell { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* TOGGLE */
+  .toggle-wrap { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .toggle {
+    position: relative;
+    width: 52px;
+    height: 28px;
+    cursor: pointer;
+  }
+  .toggle input { display: none; }
+  .toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: var(--grey-light);
+    border-radius: 28px;
+    transition: background 0.3s;
+  }
+  .toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 22px;
+    height: 22px;
+    top: 3px;
+    left: 3px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.3s;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  }
+  .toggle input:checked + .toggle-slider { background: var(--brown); }
+  .toggle input:checked + .toggle-slider::before { transform: translateX(24px); }
+  .toggle-label { font-weight: 600; font-size: 0.9rem; }
+
+  /* SLIDER */
+  input[type="range"] {
+    width: 100%;
+    accent-color: var(--brown);
+    margin: 6px 0;
+  }
+
+  /* ALERTS */
+  .alert {
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .alert.show { display: block; }
+  .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+  .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+  .alert-info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+
+  /* ROW UTILS */
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .mt8 { margin-top: 8px; }
+  .mt14 { margin-top: 14px; }
+
+  /* SPINNER */
+  .spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--grey-light);
+    border-top-color: var(--brown);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* SELECTED SERVICE DISPLAY */
+  .selected-service-bar {
+    background: #e8ddd6;
+    border: 1.5px solid var(--brown);
+    border-radius: 8px;
+    padding: 10px 14px;
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .selected-service-bar.show { display: flex; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--grey-light); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb { background: var(--brown-light); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- NAVBAR -->
+<div class="navbar">
+  <div>
+    <h1>🤖 OTP Automation</h1>
+    <span>Jio × Gemini Extractor</span>
+  </div>
+  <div class="balance-badge" id="balanceBadge">₹ ---</div>
+</div>
+
+<!-- TABS -->
+<div class="tabs">
+  <div class="tab active" onclick="showTab('setup')">⚙️ Setup</div>
+  <div class="tab" onclick="showTab('services')">📋 Services</div>
+  <div class="tab" onclick="showTab('manual')">🖐 Manual</div>
+  <div class="tab" onclick="showTab('auto')">🤖 Auto</div>
+  <div class="tab" onclick="showTab('results')">📊 Results</div>
+</div>
+
+<!-- ==================== PAGE: SETUP ==================== -->
+<div class="page active" id="page-setup">
+  <div class="card">
+    <h3>🔑 API Configuration</h3>
+    <div id="setupAlert" class="alert"></div>
+    <div class="form-group">
+      <label>OTP Doctor API Key</label>
+      <input type="password" id="apiKeyInput" placeholder="Paste your API key here" />
+    </div>
+    <div class="row">
+      <button class="btn btn-primary" onclick="testAndSaveKey()">Test & Save Key</button>
+      <span id="apiKeyStatus"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>📱 Telegram Bot</h3>
+    <div class="form-group">
+      <label>Bot Token</label>
+      <input type="password" id="telegramToken" placeholder="123456:ABC..." />
+    </div>
+    <div class="form-group">
+      <label>Chat ID</label>
+      <input type="text" id="telegramChatId" placeholder="Your Telegram chat ID" />
+    </div>
+    <div class="row">
+      <button class="btn btn-primary" onclick="saveTelegram()">Save Telegram</button>
+      <button class="btn btn-ghost" onclick="testTelegram()">Test Message</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>ℹ️ How to Get Your Config</h3>
+    <p style="font-size:0.85rem; color:var(--grey-dark); line-height:1.8;">
+      <b>API Key:</b> Login to otpdoctor.in → API Tool page → Copy your key<br/>
+      <b>Telegram Bot Token:</b> Message @BotFather on Telegram → /newbot<br/>
+      <b>Chat ID:</b> Message @userinfobot on Telegram → it will reply with your ID
+    </p>
+  </div>
+</div>
+
+<!-- ==================== PAGE: SERVICES ==================== -->
+<div class="page" id="page-services">
+  <div class="card">
+    <h3>🌍 Select Country</h3>
+    <div class="form-group">
+      <select id="countrySelect" onchange="loadServices()">
+        <option value="">-- Load countries --</option>
+      </select>
+    </div>
+    <button class="btn btn-ghost" onclick="loadCountries()" style="margin-top:4px;">Refresh Countries</button>
+  </div>
+
+  <div class="card" id="servicesCard" style="display:none">
+    <h3>📋 Services</h3>
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="serviceSearch" placeholder="Search services..." oninput="filterServices()" />
+    </div>
+    <div class="service-list" id="serviceList">
+      <div style="padding:20px; text-align:center; color:var(--grey);">Select a country first</div>
+    </div>
+    <div class="selected-service-bar" id="selectedServiceBar">
+      <span id="selectedServiceText">No service selected</span>
+      <button class="btn btn-ghost" onclick="clearServiceSelection()" style="padding:4px 10px; font-size:0.78rem;">✕ Clear</button>
+    </div>
+    <div class="mt8">
+      <button class="btn btn-primary" onclick="useServiceForManual()">Use for Manual →</button>
+      <button class="btn btn-success" onclick="useServiceForAuto()" style="margin-left:8px;">Use for Auto →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== PAGE: MANUAL ==================== -->
+<div class="page" id="page-manual">
+  <div class="card">
+    <h3>🖐 Manual Number Control</h3>
+    <div id="manualAlert" class="alert"></div>
+
+    <div class="selected-service-bar show" id="manualServiceBar">
+      <span id="manualServiceText">No service selected — go to Services tab first</span>
+    </div>
+
+    <div class="row" style="margin-bottom:14px;">
+      <div style="flex:1;">
+        <label>Numbers to buy at once</label>
+        <input type="range" id="multiCount" min="1" max="20" value="1" oninput="document.getElementById('multiCountVal').textContent = this.value" />
+        <span id="multiCountVal">1</span> numbers
+      </div>
+    </div>
+
+    <div class="toggle-wrap">
+      <label class="toggle">
+        <input type="checkbox" id="autoClickerToggle" onchange="toggleAutoClicker()" />
+        <div class="toggle-slider"></div>
+      </label>
+      <span class="toggle-label">Auto Clicker (buys every 1 second)</span>
+    </div>
+
+    <div class="row">
+      <button class="btn btn-primary" id="buyBtn" onclick="buyNumbers()">🛒 Buy Numbers</button>
+      <button class="btn btn-danger" onclick="cancelAllManual()">✕ Cancel All</button>
+    </div>
+  </div>
+
+  <div id="numbersGrid" class="numbers-grid"></div>
+</div>
+
+<!-- ==================== PAGE: AUTO ==================== -->
+<div class="page" id="page-auto">
+  <div class="card">
+    <h3>🤖 Automation Control</h3>
+    <div id="autoAlert" class="alert"></div>
+
+    <div class="selected-service-bar show" id="autoServiceBar">
+      <span id="autoServiceText">No service selected — go to Services tab first</span>
+    </div>
+
+    <div class="form-group">
+      <label>Concurrent Sessions (1–5)</label>
+      <input type="range" id="sessionCount" min="1" max="5" value="1" oninput="document.getElementById('sessionCountVal').textContent = this.value" />
+      <span id="sessionCountVal">1</span> sessions running in parallel
+    </div>
+
+    <div class="form-group">
+      <label>Max Price per Number (₹, leave blank for any)</label>
+      <input type="number" id="maxPrice" placeholder="e.g. 30" min="1" />
+    </div>
+
+    <div class="row">
+      <button class="btn btn-success" id="startAutoBtn" onclick="startAutomation()">▶ Start Automation</button>
+      <button class="btn btn-danger" id="stopAutoBtn" onclick="stopAutomation()" disabled>⏹ Stop All</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>📡 Live Session Board</h3>
+    <div class="session-board" id="sessionBoard">
+      <div style="color:var(--grey); font-size:0.85rem; grid-column:1/-1; text-align:center; padding:20px;">
+        No sessions running
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>📜 Live Log</h3>
+    <div class="log-box" id="logBox">
+      <div style="color:#888;">Waiting for activity...</div>
+    </div>
+    <button class="btn btn-ghost" onclick="clearLog()" style="margin-top:8px; font-size:0.78rem; padding:6px 12px;">Clear Log</button>
+  </div>
+</div>
+
+<!-- ==================== PAGE: RESULTS ==================== -->
+<div class="page" id="page-results">
+  <div class="card">
+    <h3>📊 Results</h3>
+    <div class="row" style="margin-bottom:14px;">
+      <button class="btn btn-primary" onclick="loadResults()">🔄 Refresh</button>
+      <a id="exportBtn" href="/api/automation/results/export" class="btn btn-ghost">⬇ Export .txt</a>
+      <button class="btn btn-danger" onclick="clearResults()">🗑 Clear All</button>
+    </div>
+    <div class="results-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Session</th>
+            <th>Phone</th>
+            <th>OTP</th>
+            <th>Gemini URL</th>
+            <th>Status</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody id="resultsBody">
+          <tr><td colspan="7" style="text-align:center; padding:20px; color:var(--grey);">No results yet</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===================== STATE =====================
+let selectedService = null; // { id, name, price, serverName }
+let allServices = [];
+let manualNumbers = {}; // activationId -> card data
+let autoClicker = null;
+const socket = io();
+
+// ===================== SOCKET =====================
+socket.on('session_update', (data) => updateSessionCard(data));
+socket.on('log', (data) => appendLog(data));
+socket.on('result', (data) => {
+  appendLog({ sessionId: data.sessionId, message: `✅ Gemini: ${data.geminiUrl}` });
+  loadResults();
+});
+socket.on('stopped', () => {
+  document.getElementById('startAutoBtn').disabled = false;
+  document.getElementById('stopAutoBtn').disabled = true;
+});
+socket.on('sessions_init', (sessions) => {
+  Object.values(sessions).forEach(s => updateSessionCard(s));
+});
+
+// ===================== TABS =====================
+function showTab(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  event.target.classList.add('active');
+  if (name === 'results') loadResults();
+  if (name === 'services' && document.getElementById('countrySelect').options.length <= 1) loadCountries();
+  refreshBalance();
+}
+
+// ===================== BALANCE =====================
+async function refreshBalance() {
+  try {
+    const r = await fetch('/api/balance');
+    const d = await r.json();
+    if (d.success) {
+      document.getElementById('balanceBadge').textContent = `₹ ${d.balance.toFixed(2)}`;
+    }
+  } catch(e) {}
+}
+
+// ===================== SETUP =====================
+async function testAndSaveKey() {
+  const key = document.getElementById('apiKeyInput').value.trim();
+  if (!key) return showAlert('setupAlert', 'Please enter your API key', 'error');
+
+  showAlert('setupAlert', 'Testing connection...', 'info');
+  try {
+    const r = await fetch('/api/test-connection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: key })
+    });
+    const d = await r.json();
+    if (d.success) {
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: key })
+      });
+      showAlert('setupAlert', `✅ Connected! Balance: ₹${d.balance}`, 'success');
+      document.getElementById('balanceBadge').textContent = `₹ ${d.balance.toFixed(2)}`;
+    } else {
+      showAlert('setupAlert', `❌ Error: ${d.error}`, 'error');
+    }
+  } catch(e) {
+    showAlert('setupAlert', `❌ Connection failed: ${e.message}`, 'error');
+  }
+}
+
+async function saveTelegram() {
+  const token = document.getElementById('telegramToken').value.trim();
+  const chatId = document.getElementById('telegramChatId').value.trim();
+  if (!token || !chatId) return showAlert('setupAlert', 'Fill both token and chat ID', 'error');
+  await fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ telegramToken: token, telegramChatId: chatId })
+  });
+  showAlert('setupAlert', '✅ Telegram config saved!', 'success');
+}
+
+async function testTelegram() {
+  // Simple test — start a session would trigger it. Just confirm save.
+  showAlert('setupAlert', 'Telegram will send a message when first Gemini URL is found.', 'info');
+}
+
+// ===================== COUNTRIES =====================
+async function loadCountries() {
+  const sel = document.getElementById('countrySelect');
+  sel.innerHTML = '<option>Loading...</option>';
+  const r = await fetch('/api/countries');
+  const d = await r.json();
+  if (d.success && d.data) {
+    sel.innerHTML = '<option value="">-- Select Country --</option>';
+    Object.entries(d.data).forEach(([code, name]) => {
+      sel.innerHTML += `<option value="${code}">${name} (${code})</option>`;
+    });
+    // Auto-select India
+    sel.value = 'in';
+    loadServices();
+  } else {
+    sel.innerHTML = '<option value="">Error loading countries</option>';
+  }
+}
+
+// ===================== SERVICES =====================
+async function loadServices() {
+  const country = document.getElementById('countrySelect').value;
+  if (!country) return;
+
+  const card = document.getElementById('servicesCard');
+  card.style.display = 'block';
+  const list = document.getElementById('serviceList');
+  list.innerHTML = '<div style="padding:20px; text-align:center;"><div class="spinner"></div> Loading...</div>';
+
+  const r = await fetch(`/api/services?country=${country}`);
+  const d = await r.json();
+
+  if (d.success && d.data) {
+    allServices = Object.entries(d.data).map(([id, info]) => ({
+      id, name: info.service_name, price: info.service_price, server: info.server_name
+    }));
+    renderServices(allServices);
+  } else {
+    list.innerHTML = '<div style="padding:20px; color:var(--red);">Error loading services</div>';
+  }
+}
+
+function renderServices(services) {
+  const list = document.getElementById('serviceList');
+  if (!services.length) {
+    list.innerHTML = '<div style="padding:20px; text-align:center; color:var(--grey);">No services found</div>';
+    return;
+  }
+  list.innerHTML = services.map(s => `
+    <div class="service-item ${selectedService && selectedService.id === s.id ? 'selected' : ''}"
+         onclick="selectService('${s.id}','${s.name}','${s.price}','${s.server}')">
+      <div>
+        <div class="service-name">${s.name}</div>
+        <div class="service-meta">${s.server} · ID: ${s.id}</div>
+      </div>
+      <div class="service-price">₹${s.price}</div>
+    </div>
+  `).join('');
+}
+
+function filterServices() {
+  const q = document.getElementById('serviceSearch').value.toLowerCase();
+  renderServices(allServices.filter(s => s.name.toLowerCase().includes(q) || s.id.includes(q)));
+}
+
+function selectService(id, name, price, server) {
+  selectedService = { id, name, price, server };
+  renderServices(allServices.filter(s => {
+    const q = document.getElementById('serviceSearch').value.toLowerCase();
+    return s.name.toLowerCase().includes(q) || s.id.includes(q);
+  }));
+  const bar = document.getElementById('selectedServiceBar');
+  bar.classList.add('show');
+  document.getElementById('selectedServiceText').textContent = `✅ ${name} — ₹${price} (${server})`;
+}
+
+function clearServiceSelection() {
+  selectedService = null;
+  document.getElementById('selectedServiceBar').classList.remove('show');
+  renderServices(allServices);
+}
+
+function useServiceForManual() {
+  if (!selectedService) return alert('Select a service first!');
+  document.getElementById('manualServiceText').textContent = `✅ ${selectedService.name} — ₹${selectedService.price}`;
+  document.getElementById('manualServiceBar').classList.add('show');
+  showTab('manual');
+}
+
+function useServiceForAuto() {
+  if (!selectedService) return alert('Select a service first!');
+  document.getElementById('autoServiceText').textContent = `✅ ${selectedService.name} — ₹${selectedService.price}`;
+  document.getElementById('autoServiceBar').classList.add('show');
+  showTab('auto');
+}
+
+// ===================== MANUAL MODE =====================
+let autoClickerActive = false;
+let autoClickerInterval = null;
+
+async function buyNumbers() {
+  if (!selectedService) return showAlert('manualAlert', 'Select a service from Services tab first!', 'error');
+  const count = parseInt(document.getElementById('multiCount').value);
+
+  for (let i = 0; i < count; i++) {
+    await buyOne();
+    if (count > 1) await new Promise(r => setTimeout(r, 300));
+  }
+}
+
+async function buyOne() {
+  const r = await fetch('/api/buy-number', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ service: selectedService.id, maxPrice: null })
+  });
+  const d = await r.json();
+  if (d.success) {
+    addNumberCard(d.activationId, d.phone);
+  } else {
+    showAlert('manualAlert', `Buy failed: ${d.error}`, 'error');
+  }
+}
+
+function addNumberCard(activationId, phone) {
+  const grid = document.getElementById('numbersGrid');
+  const card = document.createElement('div');
+  card.className = 'number-card';
+  card.id = `ncard_${activationId}`;
+  card.innerHTML = `
+    <div class="num">${phone}</div>
+    <div class="timer" id="ntimer_${activationId}">⏱ Waiting...</div>
+    <div class="sms" id="nsms_${activationId}">Waiting for SMS...</div>
+    <div class="actions">
+      <button class="btn btn-ghost" onclick="copyToClipboard('${phone}')">📋 Copy</button>
+      <button class="btn btn-ghost" onclick="checkOneSMS('${activationId}')">🔄 Check</button>
+      <button class="btn btn-danger" onclick="cancelOne('${activationId}')">✕</button>
+    </div>
+  `;
+  grid.appendChild(card);
+  manualNumbers[activationId] = { phone, interval: null };
+
+  // Auto-poll every 5 seconds
+  manualNumbers[activationId].interval = setInterval(() => checkOneSMS(activationId), 5000);
+}
+
+async function checkOneSMS(activationId) {
+  const r = await fetch(`/api/check-sms/${activationId}`);
+  const d = await r.json();
+  const smsEl = document.getElementById(`nsms_${activationId}`);
+  const timerEl = document.getElementById(`ntimer_${activationId}`);
+  if (!smsEl) return;
+
+  if (d.success) {
+    if (d.status === 'OK') {
+      smsEl.textContent = `✅ SMS: ${d.smsText}`;
+      smsEl.style.color = 'var(--green)';
+      timerEl.textContent = '✅ OTP Received!';
+      clearInterval(manualNumbers[activationId]?.interval);
+    } else if (d.status === 'WAITING') {
+      smsEl.textContent = 'Waiting for SMS...';
+    } else if (d.status === 'CANCELLED') {
+      smsEl.textContent = 'Cancelled';
+    }
+  }
+}
+
+async function cancelOne(activationId) {
+  clearInterval(manualNumbers[activationId]?.interval);
+  await fetch(`/api/cancel/${activationId}`, { method: 'POST' });
+  const card = document.getElementById(`ncard_${activationId}`);
+  if (card) card.remove();
+  delete manualNumbers[activationId];
+}
+
+function cancelAllManual() {
+  Object.keys(manualNumbers).forEach(id => cancelOne(id));
+}
+
+function toggleAutoClicker() {
+  autoClickerActive = document.getElementById('autoClickerToggle').checked;
+  if (autoClickerActive) {
+    autoClickerInterval = setInterval(() => {
+      if (selectedService) buyOne();
+    }, 1500);
+    showAlert('manualAlert', '⚡ Auto clicker ON — buying every 1.5 seconds', 'info');
+  } else {
+    clearInterval(autoClickerInterval);
+    showAlert('manualAlert', 'Auto clicker OFF', 'info');
+  }
+}
+
+// ===================== AUTO MODE =====================
+async function startAutomation() {
+  if (!selectedService) return showAlert('autoAlert', 'Select a service from Services tab first!', 'error');
+
+  const sessionCount = document.getElementById('sessionCount').value;
+  const maxPrice = document.getElementById('maxPrice').value || null;
+
+  const r = await fetch('/api/automation/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ service: selectedService.id, sessionCount, maxPrice })
+  });
+  const d = await r.json();
+
+  if (d.success) {
+    document.getElementById('startAutoBtn').disabled = true;
+    document.getElementById('stopAutoBtn').disabled = false;
+    showAlert('autoAlert', `✅ Started ${d.sessions.length} session(s)`, 'success');
+    d.sessions.forEach(id => {
+      updateSessionCard({ sessionId: id, status: 'running', step: 'Starting...', phone: null });
+    });
+  } else {
+    showAlert('autoAlert', `❌ ${d.error}`, 'error');
+  }
+}
+
+async function stopAutomation() {
+  await fetch('/api/automation/stop', { method: 'POST' });
+  document.getElementById('startAutoBtn').disabled = false;
+  document.getElementById('stopAutoBtn').disabled = true;
+  showAlert('autoAlert', '⏹ Stop signal sent', 'info');
+}
+
+function updateSessionCard(data) {
+  const board = document.getElementById('sessionBoard');
+  let card = document.getElementById(`scard_${data.sessionId}`);
+
+  if (!card) {
+    board.innerHTML = board.innerHTML.replace(/<div[^>]*>No sessions running<\/div>/, '');
+    card = document.createElement('div');
+    card.className = 'session-card';
+    card.id = `scard_${data.sessionId}`;
+    board.appendChild(card);
+  }
+
+  card.className = `session-card ${data.status || 'running'}`;
+  const shortId = data.sessionId.split('_').pop();
+  card.innerHTML = `
+    <div class="session-num">Session ${shortId}</div>
+    <div class="session-phone">${data.phone || '---'}</div>
+    <span class="badge ${data.status === 'running' ? 'badge-success' : data.status === 'stopped' ? 'badge-grey' : 'badge-warning'}">${data.status || 'running'}</span>
+    <div class="session-step" style="margin-top:6px;">${data.step || ''}</div>
+    ${data.geminiUrl ? `<div style="font-size:0.7rem; color:var(--green); margin-top:4px; word-break:break-all;">🔗 ${data.geminiUrl.substring(0, 30)}...</div>` : ''}
+  `;
+}
+
+// ===================== LOG =====================
+function appendLog(data) {
+  const box = document.getElementById('logBox');
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  const time = new Date(data.time || Date.now()).toLocaleTimeString();
+  entry.innerHTML = `<span class="log-time">[${time}]</span><span class="log-sid">[${data.sessionId}]</span>${data.message}`;
+  box.appendChild(entry);
+  box.scrollTop = box.scrollHeight;
+
+  // Keep only last 200 entries
+  while (box.children.length > 200) box.removeChild(box.firstChild);
+}
+
+function clearLog() {
+  document.getElementById('logBox').innerHTML = '<div style="color:#888;">Log cleared</div>';
+}
+
+// ===================== RESULTS =====================
+async function loadResults() {
+  const r = await fetch('/api/automation/results');
+  const d = await r.json();
+  const body = document.getElementById('resultsBody');
+
+  if (!d.success || !d.results.length) {
+    body.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px; color:var(--grey);">No results yet</td></tr>';
+    return;
+  }
+
+  body.innerHTML = d.results.map((row, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td style="font-size:0.75rem;">${row.session_id?.split('_').pop() || '—'}</td>
+      <td><code>${row.phone || '—'}</code></td>
+      <td>${row.otp || '—'}</td>
+      <td class="url-cell">
+        ${row.gemini_url
+          ? `<a href="${row.gemini_url}" target="_blank" style="color:var(--brown);">${row.gemini_url.substring(0, 35)}...</a>`
+          : '—'}
+      </td>
+      <td><span class="badge ${row.status === 'success' ? 'badge-success' : 'badge-error'}">${row.status}</span></td>
+      <td style="font-size:0.75rem;">${new Date(row.created_at).toLocaleString('en-IN')}</td>
+    </tr>
+  `).join('');
+}
+
+async function clearResults() {
+  if (!confirm('Clear all results?')) return;
+  await fetch('/api/automation/results', { method: 'DELETE' });
+  loadResults();
+}
+
+// ===================== UTILS =====================
+function showAlert(id, msg, type) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = `alert alert-${type} show`;
+  setTimeout(() => el.classList.remove('show'), 5000);
+}
+
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    // brief flash feedback
+  });
+}
+
+// ===================== INIT =====================
+window.onload = () => {
+  refreshBalance();
+  setInterval(refreshBalance, 30000);
+  loadCountries();
+};
+</script>
+</body>
+</html>
 
