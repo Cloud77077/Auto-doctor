@@ -7,7 +7,6 @@ async function getBalance(apiKey) {
   const res = await axios.get(BASE, {
     params: { action: 'getBalance', api_key: apiKey }
   });
-  // Response: ACCESS_BALANCE:123.45
   const data = res.data;
   if (data.startsWith('ACCESS_BALANCE:')) {
     return { success: true, balance: parseFloat(data.split(':')[1]) };
@@ -83,17 +82,27 @@ async function requestNextSMS(apiKey, id) {
   return { success: res.data === 'ACCESS_RETRY_GET', raw: res.data };
 }
 
-// Poll until OTP arrives or timeout
-async function waitForOTP(apiKey, id, timeoutMs = 300000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
+// Wait for OTP — driven by OTP Doctor's own STATUS_CANCEL, no hardcoded timeout
+async function waitForOTP(apiKey, id) {
+  while (true) {
     const result = await checkSMS(apiKey, id);
-    if (!result.success) return { success: false, error: result.error };
-    if (result.status === 'OK') return { success: true, smsText: result.smsText };
-    if (result.status === 'CANCELLED') return { success: false, error: 'Cancelled' };
+
+    if (!result.success) {
+      return { success: false, error: result.error };
+    }
+
+    if (result.status === 'OK') {
+      return { success: true, smsText: result.smsText };
+    }
+
+    // OTP Doctor expired the number on their end — their countdown hit zero
+    if (result.status === 'CANCELLED') {
+      return { success: false, error: 'OTP Doctor cancelled — number expired' };
+    }
+
+    // WAITING or RETRY — keep polling every 5 seconds
     await new Promise(r => setTimeout(r, 5000));
   }
-  return { success: false, error: 'Timeout waiting for OTP' };
 }
 
 // Extract OTP digits from SMS text
@@ -113,4 +122,3 @@ module.exports = {
   waitForOTP,
   extractOTP
 };
-
