@@ -1,7 +1,6 @@
 const { chromium } = require('playwright');
 
-// STEP 1: Just check if number is Jio and trigger OTP send
-// Returns: { isJio: true/false, browser, page, context }
+// STEP 1: Check if Jio number and request OTP
 async function checkIfJioAndRequestOTP({ phone, sessionId, onLog }) {
   const log = (msg) => {
     console.log(`[Session ${sessionId}] ${msg}`);
@@ -33,43 +32,47 @@ async function checkIfJioAndRequestOTP({ phone, sessionId, onLog }) {
       timeout: 30000
     });
 
-    await randomDelay(1500, 2000);
+    await randomDelay(1000, 1500);
 
     // Enter phone number
     const cleanPhone = phone.replace(/^91/, '');
     log(`Entering number: ${cleanPhone}`);
     const phoneInput = await page.waitForSelector('input[type="tel"]', { timeout: 15000 });
     await phoneInput.click();
-    await randomDelay(300, 500);
+    await randomDelay(200, 400);
     await phoneInput.fill(cleanPhone);
-    await randomDelay(800, 1200);
+    await randomDelay(600, 900);
 
     // Click Generate OTP
     log('Clicking Generate OTP...');
     const otpBtn = await page.waitForSelector('button:has-text("Generate OTP")', { timeout: 10000 });
     await otpBtn.click();
 
-    // Wait and immediately check for non-Jio error
-    await randomDelay(2000, 3000);
-    const bodyText = await page.textContent('body');
+    // Instantly detect outcome using Promise.race
+    log('Checking if Jio or non-Jio...');
+    const result = await Promise.race([
+      page.waitForSelector('text=non-Jio number', { timeout: 8000 })
+        .then(() => 'NOT_JIO'),
+      page.waitForSelector('text=OTP sent successfully', { timeout: 8000 })
+        .then(() => 'JIO'),
+      page.waitForSelector('input[maxlength="1"]', { timeout: 8000 })
+        .then(() => 'JIO')
+    ]).catch(() => 'UNKNOWN');
 
-    if (bodyText.includes('non-Jio number')) {
-      log('Non-Jio number — skipping immediately');
+    if (result === 'NOT_JIO') {
+      log('Non-Jio number detected instantly — closing');
       await browser.close();
       return { isJio: false, browser: null, page: null, context: null };
     }
 
-    // Check again after short wait
-    await randomDelay(1000, 1500);
-    const bodyText2 = await page.textContent('body');
-    if (bodyText2.includes('non-Jio number')) {
-      log('Non-Jio number — skipping immediately');
+    if (result === 'UNKNOWN') {
+      log('Could not determine Jio status — treating as non-Jio');
       await browser.close();
       return { isJio: false, browser: null, page: null, context: null };
     }
 
-    // Jio confirmed — OTP boxes should be appearing
-    log('Jio number confirmed — OTP sent by Jio');
+    // JIO confirmed
+    log('Jio number confirmed — OTP sent successfully');
     return { isJio: true, browser, page, context };
 
   } catch (err) {
@@ -107,20 +110,20 @@ async function completeLoginWithOTP({ browser, page, context, otp, sessionId, on
       await otpBoxes[i].fill(digits[i]);
     }
 
-    await randomDelay(500, 800);
+    await randomDelay(400, 700);
 
     // Click Submit
     log('Clicking Submit...');
     const submitBtn = await page.waitForSelector('button:has-text("Submit")', { timeout: 8000 });
     await submitBtn.click();
 
-    // Wait for dashboard
+    // Wait for dashboard URL
     log('Waiting for dashboard...');
     await page.waitForURL('**/selfcare/dashboard/**', { timeout: 20000 });
     await randomDelay(2000, 3000);
     log('Logged in successfully');
 
-    // Click Claim now
+    // Click Claim now banner
     log('Looking for Claim now button...');
     const claimBtn = await page.waitForSelector(
       'button:has-text("Claim now"), a:has-text("Claim now")',
@@ -129,8 +132,8 @@ async function completeLoginWithOTP({ browser, page, context, otp, sessionId, on
     await claimBtn.click();
     log('Clicked Claim now');
 
-    // Wait for Jio Google AI page
-    log('Waiting for Jio redirect page...');
+    // Wait for Jio Google AI redirect page
+    log('Waiting for Jio Google AI page...');
     await page.waitForURL('**/selfcare/googleai/**', { timeout: 15000 });
 
     // Wait for auto redirect to one.google.com
