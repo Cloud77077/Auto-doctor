@@ -1,6 +1,8 @@
 const { chromium } = require('playwright');
 
-async function loginAndExtractGemini({ phone, otp, sessionId, onLog }) {
+// STEP 1: Just check if number is Jio and trigger OTP send
+// Returns: { isJio: true/false, browser, page, context }
+async function checkIfJioAndRequestOTP({ phone, sessionId, onLog }) {
   const log = (msg) => {
     console.log(`[Session ${sessionId}] ${msg}`);
     if (onLog) onLog(msg);
@@ -25,63 +27,78 @@ async function loginAndExtractGemini({ phone, otp, sessionId, onLog }) {
 
     const page = await context.newPage();
 
-    // ── STEP 1: Open Jio login ──────────────────────────────────────
     log('Opening Jio login page...');
     await page.goto('https://www.jio.com/selfcare/login/', {
       waitUntil: 'domcontentloaded',
       timeout: 30000
     });
 
-    await randomDelay(1500, 2500);
+    await randomDelay(1500, 2000);
 
-    // ── STEP 2: Enter phone number ──────────────────────────────────
+    // Enter phone number
     const cleanPhone = phone.replace(/^91/, '');
-    log(`Entering phone number: ${cleanPhone}`);
-
+    log(`Entering number: ${cleanPhone}`);
     const phoneInput = await page.waitForSelector('input[type="tel"]', { timeout: 15000 });
     await phoneInput.click();
-    await randomDelay(300, 600);
+    await randomDelay(300, 500);
     await phoneInput.fill(cleanPhone);
-
     await randomDelay(800, 1200);
 
-    // ── STEP 3: Click Generate OTP ──────────────────────────────────
+    // Click Generate OTP
     log('Clicking Generate OTP...');
     const otpBtn = await page.waitForSelector('button:has-text("Generate OTP")', { timeout: 10000 });
     await otpBtn.click();
 
-    // ── STEP 4: Check for non-Jio error IMMEDIATELY ─────────────────
-    // Wait a moment for error to appear
+    // Wait and immediately check for non-Jio error
     await randomDelay(2000, 3000);
-
     const bodyText = await page.textContent('body');
+
     if (bodyText.includes('non-Jio number')) {
-      log('Non-Jio number detected — cancelling');
+      log('Non-Jio number — skipping immediately');
       await browser.close();
-      return { success: false, error: 'Non-Jio number', notJio: true };
+      return { isJio: false, browser: null, page: null, context: null };
     }
 
-    // Double check after another second in case error loads late
+    // Check again after short wait
     await randomDelay(1000, 1500);
     const bodyText2 = await page.textContent('body');
     if (bodyText2.includes('non-Jio number')) {
-      log('Non-Jio number detected — cancelling');
+      log('Non-Jio number — skipping immediately');
       await browser.close();
-      return { success: false, error: 'Non-Jio number', notJio: true };
+      return { isJio: false, browser: null, page: null, context: null };
     }
 
-    // ── STEP 5: Wait for 6 OTP input boxes ─────────────────────────
-    log('Jio number confirmed — waiting for OTP boxes...');
+    // Jio confirmed — OTP boxes should be appearing
+    log('Jio number confirmed — OTP sent by Jio');
+    return { isJio: true, browser, page, context };
+
+  } catch (err) {
+    log(`checkIfJio error: ${err.message}`);
+    if (browser) await browser.close();
+    return { isJio: false, browser: null, page: null, context: null };
+  }
+}
+
+// STEP 2: Complete login after OTP received
+async function completeLoginWithOTP({ browser, page, context, otp, sessionId, onLog }) {
+  const log = (msg) => {
+    console.log(`[Session ${sessionId}] ${msg}`);
+    if (onLog) onLog(msg);
+  };
+
+  try {
+    // Wait for 6 OTP input boxes
+    log('Waiting for OTP input boxes...');
     await page.waitForSelector('input[maxlength="1"]', { timeout: 25000 });
     const otpBoxes = await page.$$('input[maxlength="1"]');
 
     if (otpBoxes.length < 6) {
       log(`Expected 6 OTP boxes, found ${otpBoxes.length}`);
       await browser.close();
-      return { success: false, error: 'OTP input boxes not found', notJio: false };
+      return { success: false, error: 'OTP boxes not found' };
     }
 
-    // ── STEP 6: Enter OTP digit by digit ───────────────────────────
+    // Enter OTP digit by digit
     log(`Entering OTP: ${otp}`);
     const digits = otp.split('');
     for (let i = 0; i < 6; i++) {
@@ -92,19 +109,18 @@ async function loginAndExtractGemini({ phone, otp, sessionId, onLog }) {
 
     await randomDelay(500, 800);
 
-    // ── STEP 7: Click Submit ────────────────────────────────────────
+    // Click Submit
     log('Clicking Submit...');
     const submitBtn = await page.waitForSelector('button:has-text("Submit")', { timeout: 8000 });
     await submitBtn.click();
 
-    // ── STEP 8: Wait for dashboard ──────────────────────────────────
+    // Wait for dashboard
     log('Waiting for dashboard...');
     await page.waitForURL('**/selfcare/dashboard/**', { timeout: 20000 });
     await randomDelay(2000, 3000);
+    log('Logged in successfully');
 
-    log('Logged in — on dashboard');
-
-    // ── STEP 9: Click Claim now banner ──────────────────────────────
+    // Click Claim now
     log('Looking for Claim now button...');
     const claimBtn = await page.waitForSelector(
       'button:has-text("Claim now"), a:has-text("Claim now")',
@@ -113,12 +129,12 @@ async function loginAndExtractGemini({ phone, otp, sessionId, onLog }) {
     await claimBtn.click();
     log('Clicked Claim now');
 
-    // ── STEP 10: Wait for Jio Google AI page ───────────────────────
-    log('Waiting for Jio Google AI redirect page...');
+    // Wait for Jio Google AI page
+    log('Waiting for Jio redirect page...');
     await page.waitForURL('**/selfcare/googleai/**', { timeout: 15000 });
-    log('On Jio Google AI page — waiting for auto redirect to Google...');
 
-    // ── STEP 11: Wait for auto redirect to one.google.com ──────────
+    // Wait for auto redirect to one.google.com
+    log('Waiting for Google One redirect...');
     await page.waitForURL('**/one.google.com/**', { timeout: 20000 });
     await randomDelay(1000, 1500);
 
@@ -129,9 +145,9 @@ async function loginAndExtractGemini({ phone, otp, sessionId, onLog }) {
     return { success: true, geminiUrl: finalUrl };
 
   } catch (err) {
-    log(`Error: ${err.message}`);
+    log(`completeLogin error: ${err.message}`);
     if (browser) await browser.close();
-    return { success: false, error: err.message, notJio: false };
+    return { success: false, error: err.message };
   }
 }
 
@@ -140,4 +156,4 @@ async function randomDelay(min, max) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-module.exports = { loginAndExtractGemini };
+module.exports = { checkIfJioAndRequestOTP, completeLoginWithOTP };
