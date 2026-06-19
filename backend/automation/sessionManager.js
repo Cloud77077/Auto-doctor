@@ -3,7 +3,6 @@ const { checkIfJioAndRequestOTP, completeLoginWithOTP } = require('./jioLogin');
 const { sendGeminiResult } = require('./telegram');
 const { saveResult } = require('./database');
 
-// Global state
 const sessions = {};
 let globalStop = false;
 let io = null;
@@ -52,13 +51,10 @@ async function runSession({ sessionId, apiKey, service, telegramToken, telegramC
       }
 
       const { activationId, phone } = purchase;
-      updateSession(sessionId, { step: 'Number purchased', phone, activationId });
-      log(sessionId, `Got number: ${phone} (ID: ${activationId})`);
+      updateSession(sessionId, { step: 'Checking if Jio...', phone, activationId });
+      log(sessionId, `Got number: ${phone} — checking Jio status immediately`);
 
-      // ── STEP 2: Check if Jio IMMEDIATELY ─────────────────────────
-      updateSession(sessionId, { step: 'Checking if Jio number' });
-      log(sessionId, 'Checking if Jio number on Jio website...');
-
+      // ── STEP 2: Check Jio INSTANTLY ──────────────────────────────
       const jioCheck = await checkIfJioAndRequestOTP({
         phone,
         sessionId,
@@ -66,40 +62,36 @@ async function runSession({ sessionId, apiKey, service, telegramToken, telegramC
       });
 
       if (!jioCheck.isJio) {
-        // Not Jio — cancel and try new number immediately
-        log(sessionId, 'Non-Jio number — cancelling and buying new');
+        // Non-Jio — cancel instantly, zero delay, buy new number
+        log(sessionId, 'Non-Jio — cancelling instantly, buying new number');
         await otpDoctor.cancelNumber(apiKey, activationId);
         saveResult({ sessionId, phone, activationId, status: 'not_jio' });
-        updateSession(sessionId, { step: 'Non-Jio, buying new number...' });
-        await delay(2000);
+        updateSession(sessionId, { step: 'Non-Jio — buying new number instantly' });
+        // Zero delay — go straight to next iteration
         continue;
       }
 
-      // ── STEP 3: Jio confirmed — now wait for OTP ──────────────────
-      updateSession(sessionId, { step: 'Jio confirmed — waiting for OTP' });
-      log(sessionId, 'Jio confirmed — now waiting for OTP SMS...');
+      // ── STEP 3: Jio confirmed — wait for OTP SMS ─────────────────
+      updateSession(sessionId, { step: 'Jio ✅ — waiting for OTP SMS' });
+      log(sessionId, 'Jio confirmed — waiting for OTP SMS (max 40s)...');
 
       const otpResult = await otpDoctor.waitForOTP(apiKey, activationId);
 
       if (!otpResult.success) {
-        log(sessionId, `OTP failed: ${otpResult.error}`);
+        log(sessionId, `OTP failed: ${otpResult.error} — cancelling`);
         await otpDoctor.cancelNumber(apiKey, activationId);
-
-        // Close the browser that was kept open
         if (jioCheck.browser) await jioCheck.browser.close().catch(() => {});
-
         saveResult({ sessionId, phone, activationId, status: 'otp_failed', error: otpResult.error });
-        updateSession(sessionId, { step: 'OTP failed, retrying...' });
-        await delay(3000);
+        updateSession(sessionId, { step: 'OTP failed — buying new number' });
         continue;
       }
 
       const otp = otpDoctor.extractOTP(otpResult.smsText);
       log(sessionId, `OTP received: ${otp} (SMS: ${otpResult.smsText})`);
-      updateSession(sessionId, { step: 'OTP received — logging in', otp });
+      updateSession(sessionId, { step: `OTP received: ${otp} — logging in` });
 
-      // ── STEP 4: Complete Jio login with OTP ───────────────────────
-      updateSession(sessionId, { step: 'Logging into Jio' });
+      // ── STEP 4: Complete Jio login ────────────────────────────────
+      updateSession(sessionId, { step: 'Logging into Jio...' });
 
       const loginResult = await completeLoginWithOTP({
         browser: jioCheck.browser,
@@ -113,21 +105,21 @@ async function runSession({ sessionId, apiKey, service, telegramToken, telegramC
       if (!loginResult.success) {
         log(sessionId, `Login failed: ${loginResult.error}`);
         saveResult({ sessionId, phone, activationId, otp, status: 'login_failed', error: loginResult.error });
-        updateSession(sessionId, { step: 'Login failed, retrying...' });
-        await delay(5000);
+        updateSession(sessionId, { step: 'Login failed — buying new number' });
+        await delay(3000);
         continue;
       }
 
       // ── STEP 5: Got Gemini URL ────────────────────────────────────
       const { geminiUrl } = loginResult;
       updateSession(sessionId, { step: '✅ Gemini URL found!', geminiUrl });
-      log(sessionId, `✅ Gemini URL: ${geminiUrl}`);
+      log(sessionId, `✅ Success! Gemini URL: ${geminiUrl}`);
 
       saveResult({ sessionId, phone, activationId, otp, geminiUrl, status: 'success' });
 
       // ── STEP 6: Send to Telegram ──────────────────────────────────
       if (telegramToken && telegramChatId) {
-        updateSession(sessionId, { step: 'Sending to Telegram' });
+        updateSession(sessionId, { step: 'Sending to Telegram...' });
         await sendGeminiResult({
           botToken: telegramToken,
           chatId: telegramChatId,
@@ -140,7 +132,7 @@ async function runSession({ sessionId, apiKey, service, telegramToken, telegramC
 
       emit('result', { sessionId, phone, geminiUrl, time: new Date().toISOString() });
       updateSession(sessionId, { step: 'Done — starting next number...' });
-      await delay(3000);
+      await delay(2000);
 
     } catch (err) {
       log(sessionId, `Unexpected error: ${err.message}`);
