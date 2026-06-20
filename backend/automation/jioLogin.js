@@ -1,8 +1,5 @@
 const { chromium } = require('playwright');
 
-// STEP 1: Open Jio, enter number, click Generate OTP
-// If Jio → keep browser open ON verify page with 6 boxes already visible
-// If non-Jio → close browser immediately
 async function checkIfJioAndRequestOTP({ phone, sessionId, onLog }) {
   const log = (msg) => {
     console.log(`[Session ${sessionId}] ${msg}`);
@@ -50,8 +47,8 @@ async function checkIfJioAndRequestOTP({ phone, sessionId, onLog }) {
     const otpBtn = await page.waitForSelector('button:has-text("Generate OTP")', { timeout: 10000 });
     await otpBtn.click();
 
-    // Detect outcome — non-Jio error OR verify page with OTP boxes
-    log('Detecting if Jio or non-Jio...');
+    // Detect outcome
+    log('Detecting Jio or non-Jio...');
     const result = await Promise.race([
       page.waitForSelector('text=non-Jio number', { timeout: 10000 })
         .then(() => 'NOT_JIO'),
@@ -59,24 +56,15 @@ async function checkIfJioAndRequestOTP({ phone, sessionId, onLog }) {
         .then(() => 'JIO')
     ]).catch(() => 'UNKNOWN');
 
-    if (result === 'NOT_JIO') {
-      log('Non-Jio number — closing instantly');
+    if (result === 'NOT_JIO' || result === 'UNKNOWN') {
+      log(`Result: ${result} — closing browser`);
       await browser.close();
       return { isJio: false, browser: null, page: null };
     }
 
-    if (result === 'UNKNOWN') {
-      log('Unknown result — treating as non-Jio');
-      await browser.close();
-      return { isJio: false, browser: null, page: null };
-    }
-
-    // JIO confirmed — browser is now ON the verify page with 6 boxes visible
-    // Get the boxes right now while they are visible
-    const otpBoxes = await page.$$('input[maxlength="1"]');
-    log(`Jio confirmed — verify page open with ${otpBoxes.length} OTP boxes ready`);
-
-    return { isJio: true, browser, page, otpBoxes };
+    // Jio confirmed — page is now on verify screen with 6 boxes
+    log('Jio confirmed ✅ — verify page open with OTP boxes ready');
+    return { isJio: true, browser, page };
 
   } catch (err) {
     log(`checkIfJio error: ${err.message}`);
@@ -85,34 +73,28 @@ async function checkIfJioAndRequestOTP({ phone, sessionId, onLog }) {
   }
 }
 
-// STEP 2: OTP already received — fill the boxes that are already visible on page
-async function completeLoginWithOTP({ browser, page, otpBoxes, otp, sessionId, onLog }) {
+async function completeLoginWithOTP({ browser, page, otp, sessionId, onLog }) {
   const log = (msg) => {
     console.log(`[Session ${sessionId}] ${msg}`);
     if (onLog) onLog(msg);
   };
 
   try {
-    if (!otpBoxes || otpBoxes.length < 6) {
-      // Fallback: try to find boxes again
-      log('Re-finding OTP boxes...');
-      await page.waitForSelector('input[maxlength="1"]', { timeout: 10000 });
-      otpBoxes = await page.$$('input[maxlength="1"]');
-    }
+    // Make sure OTP boxes are visible
+    log('Confirming OTP boxes are visible...');
+    await page.waitForSelector('input[maxlength="1"]', { timeout: 10000 });
 
-    if (!otpBoxes || otpBoxes.length < 6) {
-      log(`Only found ${otpBoxes?.length} OTP boxes`);
-      await browser.close();
-      return { success: false, error: 'OTP boxes not found' };
-    }
-
-    // Enter OTP digit by digit into already visible boxes
+    // Click ONLY the first box — auto-jump handles the rest
     log(`Entering OTP: ${otp}`);
+    const firstBox = await page.$('input[maxlength="1"]');
+    await firstBox.click();
+    await randomDelay(200, 300);
+
+    // Type all 6 digits one by one — focus auto-jumps to next box after each
     const digits = otp.split('');
     for (let i = 0; i < 6; i++) {
-      await otpBoxes[i].click();
-      await randomDelay(80, 150);
-      await otpBoxes[i].fill(digits[i]);
+      await page.keyboard.press(digits[i]);
+      await randomDelay(100, 200);
     }
 
     await randomDelay(400, 600);
@@ -126,9 +108,9 @@ async function completeLoginWithOTP({ browser, page, otpBoxes, otp, sessionId, o
     log('Waiting for dashboard...');
     await page.waitForURL('**/selfcare/dashboard/**', { timeout: 20000 });
     await randomDelay(2000, 3000);
-    log('Logged in successfully ✅');
+    log('On dashboard ✅');
 
-    // Click Claim now banner
+    // Click Claim now
     log('Looking for Claim now button...');
     const claimBtn = await page.waitForSelector(
       'button:has-text("Claim now"), a:has-text("Claim now")',
@@ -137,15 +119,28 @@ async function completeLoginWithOTP({ browser, page, otpBoxes, otp, sessionId, o
     await claimBtn.click();
     log('Clicked Claim now');
 
-    // Wait for Jio Google AI page
+    // Wait for googleai page
     log('Waiting for Jio Google AI page...');
     await page.waitForURL('**/selfcare/googleai/**', { timeout: 15000 });
-
-    // Wait for auto redirect to one.google.com
-    log('Waiting for Google One redirect...');
-    await page.waitForURL('**/one.google.com/**', { timeout: 20000 });
     await randomDelay(1000, 1500);
 
+    // Try auto redirect first, fallback click "Redirecting" button
+    log('Waiting for redirect to Google One...');
+    const googleRedirect = await Promise.race([
+      page.waitForURL('**/one.google.com/**', { timeout: 8000 })
+        .then(() => 'AUTO'),
+      page.waitForSelector('button:has-text("Redirecting"), a:has-text("Redirecting")', { timeout: 8000 })
+        .then(() => 'MANUAL')
+    ]).catch(() => 'MANUAL');
+
+    if (googleRedirect === 'MANUAL') {
+      log('Clicking Redirecting button manually...');
+      const redirectBtn = await page.$('button:has-text("Redirecting"), a:has-text("Redirecting")');
+      if (redirectBtn) await redirectBtn.click();
+      await page.waitForURL('**/one.google.com/**', { timeout: 15000 });
+    }
+
+    await randomDelay(1000, 1500);
     const finalUrl = page.url();
     log(`Got Google One URL: ${finalUrl}`);
 
