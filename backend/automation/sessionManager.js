@@ -55,7 +55,6 @@ async function runSession({ sessionId, apiKey, service, telegramToken, telegramC
       log(sessionId, `Got number: ${phone} — checking Jio status immediately`);
 
       // ── STEP 2: Check Jio instantly ──────────────────────────────
-      // Browser stays open ON verify page with OTP boxes already visible if Jio
       const jioCheck = await checkIfJioAndRequestOTP({
         phone,
         sessionId,
@@ -63,7 +62,6 @@ async function runSession({ sessionId, apiKey, service, telegramToken, telegramC
       });
 
       if (!jioCheck.isJio) {
-        // Non-Jio — cancel instantly, zero delay
         log(sessionId, 'Non-Jio — cancelling instantly');
         await otpDoctor.cancelNumber(apiKey, activationId);
         saveResult({ sessionId, phone, activationId, status: 'not_jio' });
@@ -72,14 +70,13 @@ async function runSession({ sessionId, apiKey, service, telegramToken, telegramC
       }
 
       // ── STEP 3: Jio confirmed — wait for OTP SMS ─────────────────
-      // Browser is sitting on verify page with boxes visible and waiting
       updateSession(sessionId, { step: 'Jio ✅ — waiting for OTP SMS' });
-      log(sessionId, 'Jio confirmed — waiting for OTP SMS...');
+      log(sessionId, 'Waiting for OTP SMS...');
 
       const otpResult = await otpDoctor.waitForOTP(apiKey, activationId);
 
       if (!otpResult.success) {
-        log(sessionId, `OTP failed: ${otpResult.error} — cancelling`);
+        log(sessionId, `OTP failed: ${otpResult.error}`);
         await otpDoctor.cancelNumber(apiKey, activationId);
         if (jioCheck.browser) await jioCheck.browser.close().catch(() => {});
         saveResult({ sessionId, phone, activationId, status: 'otp_failed', error: otpResult.error });
@@ -88,16 +85,13 @@ async function runSession({ sessionId, apiKey, service, telegramToken, telegramC
       }
 
       const otp = otpDoctor.extractOTP(otpResult.smsText);
-      log(sessionId, `OTP received: ${otp} (SMS: ${otpResult.smsText})`);
-      updateSession(sessionId, { step: `OTP: ${otp} — logging in` });
+      log(sessionId, `OTP received: ${otp}`);
+      updateSession(sessionId, { step: `OTP: ${otp} — entering now` });
 
-      // ── STEP 4: Fill OTP into already open verify page ────────────
-      updateSession(sessionId, { step: 'Entering OTP...' });
-
+      // ── STEP 4: Enter OTP into already open verify page ───────────
       const loginResult = await completeLoginWithOTP({
         browser: jioCheck.browser,
         page: jioCheck.page,
-        otpBoxes: jioCheck.otpBoxes,
         otp,
         sessionId,
         onLog: (msg) => log(sessionId, msg)
@@ -114,7 +108,7 @@ async function runSession({ sessionId, apiKey, service, telegramToken, telegramC
       // ── STEP 5: Got Gemini URL ────────────────────────────────────
       const { geminiUrl } = loginResult;
       updateSession(sessionId, { step: '✅ Gemini URL found!', geminiUrl });
-      log(sessionId, `✅ Success! Gemini URL: ${geminiUrl}`);
+      log(sessionId, `✅ Gemini URL: ${geminiUrl}`);
 
       saveResult({ sessionId, phone, activationId, otp, geminiUrl, status: 'success' });
 
